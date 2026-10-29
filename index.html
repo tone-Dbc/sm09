@@ -1,0 +1,30 @@
+<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>SM-09</title>
+<style>body{font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;margin:0}#st{padding:14px}</style>
+<div id=st>Conectando à ponte...</div>
+<script>
+const F=new URLSearchParams(location.hash.slice(1)),TK=F.get('t')||'',SALT=F.get('s')||'',R='https://ntfy.sh/';
+const enc=new TextEncoder(),hex=b=>[...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('');
+const sha=s=>crypto.subtle.digest('SHA-256',enc.encode(s));let KEY,QT,RT,pend={};
+async function init(){if(!TK){st.textContent='Link sem chave.';return}
+ KEY=await crypto.subtle.importKey('raw',await sha('sm09key|'+TK),'AES-GCM',false,['encrypt','decrypt']);
+ QT='sm09q'+hex(await sha('q|'+TK+SALT)).slice(0,28);RT='sm09r'+hex(await sha('r|'+TK+SALT)).slice(0,28);
+ const es=new EventSource(R+RT+'/sse');es.onmessage=async e=>{try{const m=JSON.parse(e.data);if(!m.attachment)return;
+  const b=new Uint8Array(await (await fetch(m.attachment.url)).arrayBuffer());
+  const pt=await crypto.subtle.decrypt({name:'AES-GCM',iv:b.slice(0,12)},KEY,b.slice(12));
+  const j=JSON.parse(await new Response(new Blob([pt]).stream().pipeThrough(new DecompressionStream('gzip'))).text());
+  if(pend[j.id]){pend[j.id](j);delete pend[j.id]}}catch(x){}};
+ await new Promise(r=>es.onopen=r);load()}
+async function call(a,b){const id=crypto.randomUUID(),iv=crypto.getRandomValues(new Uint8Array(12));
+ const ct=new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM',iv},KEY,enc.encode(JSON.stringify({id,a,b,ts:Date.now()}))));
+ const all=new Uint8Array(12+ct.length);all.set(iv);all.set(ct,12);
+ const p=new Promise((ok,no)=>{pend[id]=ok;setTimeout(()=>{if(pend[id]){delete pend[id];no(new Error('sem resposta da ponte (computador offline?)'))}},a?600000:60000)});
+ await fetch(R+QT,{method:'POST',body:btoa(String.fromCharCode(...all))});return p}
+window.api=async(a,b)=>{try{return JSON.parse((await call(a,b)).body)}catch(e){return{erro:e.message}}};
+async function load(){const t0=Date.now();st.textContent='Carregando lista...';
+ try{const r=await call('',null);if(r.s!=200){st.textContent='Erro '+r.s;return}
+ const d=new DOMParser().parseFromString(r.body,'text/html');const sc=[...d.querySelectorAll('script')].map(s=>s.textContent).join('\n');
+ d.querySelectorAll('script').forEach(s=>s.remove());document.head.append(...d.head.querySelectorAll('style'));document.body.innerHTML=d.body.innerHTML;
+ (0,eval)(sc.replace(/const T=[^\n]*\n/,'').replace(/async function api\([^\n]*\n/,''));
+ console.log('carregado em',Date.now()-t0,'ms')}catch(e){st.textContent=e.message}}
+init();
+</script>
